@@ -1,0 +1,9 @@
+{
+  "id": "com.micyou.plugin.iosbridge",
+  "name": "iOS To PC",
+  "version": "0.5.0",
+  "author": "herbrine8403",
+  "description": "Bridge MicYou desktop with the iOS companion client",
+  "minApiVersion": "1.0.0",
+  "mainClass": "com.micyou.plugin.iosbridge.IOSBridgePlugin"
+}
