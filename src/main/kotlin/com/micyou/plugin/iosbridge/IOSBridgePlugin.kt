@@ -4,6 +4,7 @@ import com.lanrhyme.micyou.plugin.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.Flow
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
