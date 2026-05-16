@@ -1,9 +1,9 @@
 {
   "id": "com.micyou.plugin.iosbridge",
   "name": "iOS To PC",
-  "version": "1.0.0",
-  "author": "MicYou Team",
-  "description": "Enables iOS devices to connect to MicYou PC as wireless microphones via TCP/UDP protocol.",
+  "version": "3.0.0 Beta",
+  "author": "herbrine8403",
+  "description": "Enables iOS devices to connect to MicYou PC as wireless microphones (V3)",
   "tags": ["ios", "wireless", "microphone", "bridge"],
   "platform": "desktop",
   "minApiVersion": "1.0.0",

@@ -1,78 +1,111 @@
 package com.micyou.plugin.iosbridge
 
-import com.lanrhyme.micyou.plugin.AudioConfig
 import com.lanrhyme.micyou.plugin.AudioEffectProvider
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
-class IOSAudioEffectProvider : AudioEffectProvider {
+class IOSAudioEffectProvider(
+    override val id: String = "ios-bridge-audio"
+) : AudioEffectProvider {
 
-    override val id: String = "com.micyou.plugin.iosbridge.audio"
-    override val name: String = "iOS Bridge Audio"
-    override val description: String = "Audio input from connected iOS device via UDP bridge"
-    override var isEnabled: Boolean = true
+    override val name: String = "iOS Audio Bridge"
+    override val description: String = "Injects audio from connected iOS devices"
 
-    private val audioBuffer = ConcurrentLinkedQueue<ShortArray>()
+    private val _isEnabled = AtomicBoolean(true)
+    override var isEnabled: Boolean
+        get() = _isEnabled.get()
+        set(value) = _isEnabled.set(value)
+
+    private val audioQueue = ConcurrentLinkedQueue<ShortArray>()
+    @Volatile
+    var sampleRate = 44100
+        private set
+    @Volatile
+    var channelCount = 1
+        private set
+
     private val _isActive = AtomicBoolean(false)
-
     val isActive: Boolean get() = _isActive.get()
 
-    private var currentSampleRate: Int = 48000
-    private var currentChannelCount: Int = 1
-
-    fun addPcm16LeData(pcmBytes: ByteArray) {
-        if (pcmBytes.isEmpty()) return
-
-        val shorts = ShortArray(pcmBytes.size / 2)
-        for (i in shorts.indices) {
-            val low = pcmBytes[i * 2].toInt() and 0xFF
-            val high = pcmBytes[i * 2 + 1].toInt() and 0xFF
-            shorts[i] = ((high shl 8) or low).toShort()
-        }
-
-        if (shorts.isNotEmpty()) {
-            audioBuffer.offer(shorts)
-            _isActive.set(true)
-        }
+    fun setAudioConfig(sampleRate: Int, channelCount: Int) {
+        this.sampleRate = sampleRate
+        this.channelCount = channelCount
     }
 
-    fun setAudioFormat(sampleRate: Int, channelCount: Int) {
-        currentSampleRate = sampleRate
-        currentChannelCount = channelCount
+    fun addPcm16LeData(data: ByteArray) {
+        val samples = pcm16leToShortArray(data)
+        if (audioQueue.size < 32) {
+            audioQueue.offer(samples)
+            _isActive.set(true)
+        }
     }
 
     override fun process(input: ShortArray, channelCount: Int, sampleRate: Int): ShortArray {
         if (!isEnabled) return input
 
-        val bufferedAudio = audioBuffer.poll()
-        return if (bufferedAudio != null && bufferedAudio.isNotEmpty()) {
-            // 确保返回的音频长度与 input 一致
-            if (bufferedAudio.size == input.size) {
-                bufferedAudio
-            } else if (bufferedAudio.size > input.size) {
-                // 截取前 input.size 个样本
-                bufferedAudio.copyOf(input.size)
+        val iosAudio = audioQueue.poll()
+        return if (iosAudio != null) {
+            if (iosAudio.size == input.size && sampleRate == this.sampleRate && channelCount == this.channelCount) {
+                iosAudio
             } else {
-                // 不足部分补零
-                val result = ShortArray(input.size)
-                System.arraycopy(bufferedAudio, 0, result, 0, bufferedAudio.size)
-                result
+                resample(iosAudio, this.sampleRate, this.channelCount, input.size, sampleRate, channelCount)
             }
         } else {
-            // 没有 iOS 音频数据时返回静音
-            ShortArray(input.size) { 0 }
+            if (_isActive.get() && audioQueue.isEmpty()) {
+                _isActive.set(false)
+            }
+            input
         }
     }
 
     override fun reset() {
-        audioBuffer.clear()
+        audioQueue.clear()
         _isActive.set(false)
     }
 
     override fun release() {
-        reset()
+        isEnabled = false
+        audioQueue.clear()
+        _isActive.set(false)
     }
 
-    override fun onConfigChanged(config: AudioConfig) {
+    private fun pcm16leToShortArray(pcmBytes: ByteArray): ShortArray {
+        val sampleCount = pcmBytes.size / 2
+        return ShortArray(sampleCount) { i ->
+            ((pcmBytes[i * 2].toInt() and 0xFF) or ((pcmBytes[i * 2 + 1].toInt() and 0xFF) shl 8)).toShort()
+        }
+    }
+
+    private fun resample(
+        input: ShortArray,
+        inputSampleRate: Int,
+        inputChannels: Int,
+        outputSize: Int,
+        outputSampleRate: Int,
+        outputChannels: Int
+    ): ShortArray {
+        val output = ShortArray(outputSize)
+
+        if (inputSampleRate == outputSampleRate && inputChannels == outputChannels) {
+            val copySize = minOf(input.size, outputSize)
+            System.arraycopy(input, 0, output, 0, copySize)
+            return output
+        }
+
+        val ratio = inputSampleRate.toDouble() / outputSampleRate.toDouble()
+
+        for (i in 0 until outputSize) {
+            val inputIndex = (i * ratio).toInt() * inputChannels
+            if (inputIndex < input.size) {
+                output[i] = input[inputIndex]
+            } else {
+                output[i] = 0
+            }
+        }
+
+        return output
     }
 }

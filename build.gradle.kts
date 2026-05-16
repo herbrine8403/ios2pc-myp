@@ -1,6 +1,3 @@
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
-
 plugins {
     kotlin("jvm") version "2.2.20"
     kotlin("plugin.serialization") version "2.2.20"
@@ -17,11 +14,13 @@ repositories {
 dependencies {
     compileOnly(files("../MicYou/plugin-api/build/libs/plugin-api-jvm-1.0.0.jar"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-protobuf:1.9.0")
 }
 
 tasks.jar {
     archiveFileName.set("plugin.jar")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
 }
 
 tasks.register<Copy>("copyDependencies") {

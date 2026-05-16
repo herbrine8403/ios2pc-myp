@@ -1,11 +1,13 @@
 package com.micyou.plugin.iosbridge
 
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.encodeToByteArray
+import kotlinx.serialization.protobuf.ProtoBuf
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 object IosProtocol {
-
-    const val MAGIC_HEADER: Int = 0x694F5354
+    const val MAGIC_HEADER = 0x694F5354
 
     enum class MessageType(val value: Int) {
         Hello(1),
@@ -15,7 +17,7 @@ object IosProtocol {
         AudioFrame(16)
     }
 
-    data class MessageHeader(
+    data class Header(
         val magic: Int,
         val type: Int,
         val payloadLength: Int,
@@ -29,92 +31,94 @@ object IosProtocol {
         val channelCount: Int
     )
 
-    data class AckPayload(
-        val success: Boolean,
-        val udpPort: Int,
-        val message: String
-    )
-
     data class AudioFramePayload(
         val sequence: Int,
         val timestamp: Long,
         val sampleRate: Int,
         val channelCount: Int,
         val pcmData: ByteArray
-    )
+    ) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (javaClass != other?.javaClass) return false
+            other as AudioFramePayload
+            if (sequence != other.sequence) return false
+            if (timestamp != other.timestamp) return false
+            if (sampleRate != other.sampleRate) return false
+            if (channelCount != other.channelCount) return false
+            if (!pcmData.contentEquals(other.pcmData)) return false
+            return true
+        }
 
-    fun parseHeader(buffer: ByteArray): MessageHeader? {
-        if (buffer.size < 16) return null
-        val bb = ByteBuffer.wrap(buffer).order(ByteOrder.BIG_ENDIAN)
-        val magic = bb.int
-        if (magic != MAGIC_HEADER) return null
-        return MessageHeader(
-            magic = magic,
-            type = bb.int,
-            payloadLength = bb.int,
-            sequence = bb.int
-        )
+        override fun hashCode(): Int {
+            var result = sequence
+            result = 31 * result + timestamp.hashCode()
+            result = 31 * result + sampleRate
+            result = 31 * result + channelCount
+            result = 31 * result + pcmData.contentHashCode()
+            return result
+        }
+    }
+
+    fun parseHeader(data: ByteArray): Header? {
+        if (data.size < 16) return null
+        val buffer = ByteBuffer.wrap(data, 0, 16).order(ByteOrder.BIG_ENDIAN)
+        val magic = buffer.int
+        val type = buffer.int
+        val payloadLength = buffer.int
+        val sequence = buffer.int
+        return Header(magic, type, payloadLength, sequence)
     }
 
     fun parseHelloPayload(payload: ByteArray): HelloPayload? {
-        return try {
-            val bb = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN)
-            val nameLen = bb.int
+        try {
+            val buffer = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN)
+            val nameLen = buffer.int
             val nameBytes = ByteArray(nameLen)
-            bb.get(nameBytes)
-            val idLen = bb.int
+            buffer.get(nameBytes)
+            val idLen = buffer.int
             val idBytes = ByteArray(idLen)
-            bb.get(idBytes)
-            val sampleRate = bb.int
-            val channelCount = bb.int
-            HelloPayload(
-                deviceName = String(nameBytes, Charsets.UTF_8),
-                deviceId = String(idBytes, Charsets.UTF_8),
-                sampleRate = sampleRate,
-                channelCount = channelCount
+            buffer.get(idBytes)
+            val sampleRate = buffer.int
+            val channelCount = buffer.int
+            return HelloPayload(
+                String(nameBytes, Charsets.UTF_8),
+                String(idBytes, Charsets.UTF_8),
+                sampleRate,
+                channelCount
             )
         } catch (e: Exception) {
-            null
+            return null
         }
     }
 
     fun parseAudioFramePayload(payload: ByteArray): AudioFramePayload? {
-        return try {
-            val bb = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN)
-            val sequence = bb.int
-            val timestamp = bb.long
-            val sampleRate = bb.int
-            val channelCount = bb.int
-            val dataLen = bb.int
+        try {
+            val buffer = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN)
+            val sequence = buffer.int
+            val timestamp = buffer.long
+            val sampleRate = buffer.int
+            val channelCount = buffer.int
+            val dataLen = buffer.int
             val pcmData = ByteArray(dataLen)
-            bb.get(pcmData)
-            AudioFramePayload(
-                sequence = sequence,
-                timestamp = timestamp,
-                sampleRate = sampleRate,
-                channelCount = channelCount,
-                pcmData = pcmData
-            )
+            buffer.get(pcmData)
+            return AudioFramePayload(sequence, timestamp, sampleRate, channelCount, pcmData)
         } catch (e: Exception) {
-            null
+            return null
         }
     }
 
-    fun encodeAck(success: Boolean, udpPort: Int, message: String): ByteArray {
+    fun encodeAck(success: Boolean, audioPort: Int, message: String): ByteArray {
         val msgBytes = message.toByteArray(Charsets.UTF_8)
-        val payloadLen = 1 + 4 + 4 + msgBytes.size
-        val buffer = ByteBuffer.allocate(16 + payloadLen).order(ByteOrder.BIG_ENDIAN)
-
+        val buffer = ByteBuffer.allocate(16 + 1 + 4 + 4 + msgBytes.size).order(ByteOrder.BIG_ENDIAN)
         buffer.putInt(MAGIC_HEADER)
         buffer.putInt(MessageType.Ack.value)
-        buffer.putInt(payloadLen)
+        buffer.putInt(1 + 4 + 4 + msgBytes.size)
         buffer.putInt(0)
-
         buffer.put(if (success) 1.toByte() else 0.toByte())
-        buffer.putInt(udpPort)
+        buffer.putInt(audioPort)
         buffer.putInt(msgBytes.size)
         buffer.put(msgBytes)
-
         return buffer.array()
     }
 
@@ -125,5 +129,41 @@ object IosProtocol {
         buffer.putInt(0)
         buffer.putInt(sequence)
         return buffer.array()
+    }
+
+    @OptIn(ExperimentalSerializationApi::class)
+    fun convertToAndroidAudioPacket(
+        seq: Int,
+        timestamp: Long,
+        sampleRate: Int,
+        channelCount: Int,
+        pcmData: ByteArray
+    ): ByteArray {
+        val audioPacket = AudioPacketMessage(
+            buffer = pcmData,
+            sampleRate = sampleRate,
+            channelCount = channelCount,
+            audioFormat = 2
+        )
+
+        val orderedPacket = AudioPacketMessageOrdered(
+            sequenceNumber = seq,
+            audioPacket = audioPacket,
+            timestamp = timestamp
+        )
+
+        val wrapper = MessageWrapper(audioPacket = orderedPacket)
+
+        val proto = ProtoBuf { }
+        val payload = proto.encodeToByteArray(MessageWrapper.serializer(), wrapper)
+        val payloadLength = payload.size
+
+        val packetBytes = ByteArray(8 + payloadLength)
+        val buffer = ByteBuffer.wrap(packetBytes)
+        buffer.putInt(UDP_PACKET_MAGIC)
+        buffer.putInt(payloadLength)
+        buffer.put(payload)
+
+        return packetBytes
     }
 }
