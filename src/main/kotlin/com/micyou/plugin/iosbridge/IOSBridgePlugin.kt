@@ -193,7 +193,7 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
         val ack = IosProtocol.encodeAck(true, udpPort, "Connected to MicYou PC")
         channel.send(ack)
 
-        ctx.host.showNotification("iOS Bridge", "Device '${hello.deviceName}' connected")
+        ctx.host.showNotification("iOS Bridge", "Device '${hello.deviceName}' connected. Please click 'Start' in MicYou to begin audio streaming.")
     }
 
     private suspend fun handleKeepAlive(channel: PluginDataChannel) {

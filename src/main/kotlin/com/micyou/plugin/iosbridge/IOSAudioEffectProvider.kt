@@ -46,9 +46,21 @@ class IOSAudioEffectProvider : AudioEffectProvider {
 
         val bufferedAudio = audioBuffer.poll()
         return if (bufferedAudio != null && bufferedAudio.isNotEmpty()) {
-            bufferedAudio
+            // 确保返回的音频长度与 input 一致
+            if (bufferedAudio.size == input.size) {
+                bufferedAudio
+            } else if (bufferedAudio.size > input.size) {
+                // 截取前 input.size 个样本
+                bufferedAudio.copyOf(input.size)
+            } else {
+                // 不足部分补零
+                val result = ShortArray(input.size)
+                System.arraycopy(bufferedAudio, 0, result, 0, bufferedAudio.size)
+                result
+            }
         } else {
-            input
+            // 没有 iOS 音频数据时返回静音
+            ShortArray(input.size) { 0 }
         }
     }
 
