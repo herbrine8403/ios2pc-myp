@@ -212,6 +212,34 @@ class VirtualAndroidClient {
 
         output.write(packet)
         output.flush()
+        
+        // 4. 等待服务器响应（读取第一个消息确认连接成功）
+        val headerBuf = ByteArray(8)
+        totalRead = 0
+        while (totalRead < 8) {
+            val read = input.read(headerBuf, totalRead, 8 - totalRead)
+            if (read == -1) {
+                throw EOFException("Handshake failed: connection closed while reading response")
+            }
+            totalRead += read
+        }
+        
+        val respBuffer = ByteBuffer.wrap(headerBuf)
+        val magic = respBuffer.int
+        if (magic != PACKET_MAGIC) {
+            throw IOException("Handshake failed: invalid response magic")
+        }
+        
+        val respLength = respBuffer.int
+        if (respLength > 0 && respLength < MAX_PACKET_SIZE) {
+            val respBytes = ByteArray(respLength)
+            totalRead = 0
+            while (totalRead < respLength) {
+                val read = input.read(respBytes, totalRead, respLength - totalRead)
+                if (read == -1) break
+                totalRead += read
+            }
+        }
     }
 
     private fun setupUdp() {
