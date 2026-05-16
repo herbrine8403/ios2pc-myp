@@ -236,6 +236,12 @@ class VirtualAndroidClient {
         receiveJob = scope.launch(Dispatchers.IO) {
             processReceiveLoop()
         }
+        
+        // 立即发送第一个Ping，确保连接活跃
+        scope.launch(Dispatchers.IO) {
+            delay(500)
+            sendPing()
+        }
     }
 
     private suspend fun processSendQueue() {
