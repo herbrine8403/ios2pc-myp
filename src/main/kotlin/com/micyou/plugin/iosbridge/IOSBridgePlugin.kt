@@ -3,6 +3,7 @@ package com.micyou.plugin.iosbridge
 import com.lanrhyme.micyou.plugin.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -56,9 +57,24 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
         host.registerAudioEffect(audioEffectProvider, effectPriority)
         ctx.log("IOSBridgePlugin audio effect registered")
 
+        // 监听 MicYou 音频流状态，只在 Streaming 状态时开放端口
         pluginScope?.launch {
-            startTcpControlChannel()
-            startUdpAudioChannel()
+            host.streamState
+                .distinctUntilChanged()
+                .collectLatest { state ->
+                    when (state) {
+                        StreamState.Streaming -> {
+                            ctx.log("MicYou stream started, opening iOS bridge ports...")
+                            startTcpControlChannel()
+                            startUdpAudioChannel()
+                        }
+                        StreamState.Idle -> {
+                            ctx.log("MicYou stream stopped, closing iOS bridge ports...")
+                            stopChannels()
+                        }
+                        else -> {}
+                    }
+                }
         }
     }
 
@@ -193,7 +209,9 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
         val ack = IosProtocol.encodeAck(true, udpPort, "Connected to MicYou PC")
         channel.send(ack)
 
-        ctx.host.showNotification("iOS Bridge", "Device '${hello.deviceName}' connected. Please click 'Start' in MicYou to begin audio streaming.")
+        // 显示连接成功通知
+        ctx.host.showNotification("iOS Bridge", "Device '${hello.deviceName}' connected and ready for audio streaming.")
+        ctx.host.showSnackbar("iOS设备 '${hello.deviceName}' 已连接")
     }
 
     private suspend fun handleKeepAlive(channel: PluginDataChannel) {
