@@ -36,6 +36,11 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
     companion object {
         const val CHANNEL_TCP_CONTROL = "ios-bridge-tcp-control"
         const val CHANNEL_UDP_AUDIO = "ios-bridge-udp-audio"
+        
+        /** 默认 TCP 控制端口，iOS 设备需要连接此端口 */
+        const val DEFAULT_TCP_PORT = 8900
+        /** 默认 UDP 音频端口 */
+        const val DEFAULT_UDP_PORT = 8901
     }
 
     override fun onLoad(context: PluginContext) {
@@ -80,21 +85,30 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
 
         val config = DataChannelConfig(
             mode = DataChannelMode.Tcp,
-            port = 0,
+            port = DEFAULT_TCP_PORT,
             bufferSize = 8192
         )
 
         tcpChannel = host.createDataChannel(CHANNEL_TCP_CONTROL, config)
 
         val channel = tcpChannel ?: return
-        val result = channel.bind(0)
+        val result = channel.bind(DEFAULT_TCP_PORT)
 
         if (result.isSuccess) {
-            ctx.log("TCP control channel bound to port ${channel.localPort}")
+            val actualPort = channel.localPort
+            ctx.log("TCP control channel bound to port $actualPort")
+            ctx.host.showNotification(
+                "iOS Bridge Ready",
+                "Please connect iOS device to TCP port $actualPort"
+            )
             isRunning = true
             listenTcpControl(channel)
         } else {
-            ctx.logError("Failed to bind TCP control channel", result.exceptionOrNull())
+            ctx.logError("Failed to bind TCP control channel to port $DEFAULT_TCP_PORT", result.exceptionOrNull())
+            ctx.host.showNotification(
+                "iOS Bridge Error",
+                "Failed to bind to port $DEFAULT_TCP_PORT. Please check if port is in use."
+            )
         }
     }
 
@@ -104,20 +118,20 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
 
         val config = DataChannelConfig(
             mode = DataChannelMode.Udp,
-            port = 0,
+            port = DEFAULT_UDP_PORT,
             bufferSize = 65536
         )
 
         udpChannel = host.createDataChannel(CHANNEL_UDP_AUDIO, config)
 
         val channel = udpChannel ?: return
-        val result = channel.bind(0)
+        val result = channel.bind(DEFAULT_UDP_PORT)
 
         if (result.isSuccess) {
             ctx.log("UDP audio channel bound to port ${channel.localPort}")
             listenUdpAudio(channel)
         } else {
-            ctx.logError("Failed to bind UDP audio channel", result.exceptionOrNull())
+            ctx.logError("Failed to bind UDP audio channel to port $DEFAULT_UDP_PORT", result.exceptionOrNull())
         }
     }
 
