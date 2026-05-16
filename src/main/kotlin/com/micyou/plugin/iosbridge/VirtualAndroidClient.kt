@@ -176,11 +176,9 @@ class VirtualAndroidClient {
         val input = tcpInput ?: throw IOException("TCP input stream not available")
         val output = tcpOutput ?: throw IOException("TCP output stream not available")
 
-        // 1. 发送 "MicYouCheck1"（11 字节纯文本）
         output.write(CHECK_1.encodeToByteArray())
         output.flush()
 
-        // 2. 接收 "MicYouCheck2"
         val check2Buf = ByteArray(CHECK_2_LEN)
         var totalRead = 0
         while (totalRead < CHECK_2_LEN) {
@@ -194,51 +192,6 @@ class VirtualAndroidClient {
         val check2String = check2Buf.decodeToString()
         if (check2String != CHECK_2) {
             throw IOException("Handshake failed: expected '$CHECK_2', got '$check2String'")
-        }
-
-        // 3. 发送 MessageWrapper(connect=ConnectMessage())
-        @OptIn(ExperimentalSerializationApi::class)
-        val connectBytes = proto.encodeToByteArray(
-            MessageWrapper.serializer(),
-            MessageWrapper(connect = ConnectMessage())
-        )
-
-        val length = connectBytes.size
-        val packet = ByteArray(8 + length)
-        val buffer = ByteBuffer.wrap(packet)
-        buffer.putInt(PACKET_MAGIC)
-        buffer.putInt(length)
-        buffer.put(connectBytes)
-
-        output.write(packet)
-        output.flush()
-        
-        // 4. 等待服务器响应（读取第一个消息确认连接成功）
-        val headerBuf = ByteArray(8)
-        totalRead = 0
-        while (totalRead < 8) {
-            val read = input.read(headerBuf, totalRead, 8 - totalRead)
-            if (read == -1) {
-                throw EOFException("Handshake failed: connection closed while reading response")
-            }
-            totalRead += read
-        }
-        
-        val respBuffer = ByteBuffer.wrap(headerBuf)
-        val magic = respBuffer.int
-        if (magic != PACKET_MAGIC) {
-            throw IOException("Handshake failed: invalid response magic")
-        }
-        
-        val respLength = respBuffer.int
-        if (respLength > 0 && respLength < MAX_PACKET_SIZE) {
-            val respBytes = ByteArray(respLength)
-            totalRead = 0
-            while (totalRead < respLength) {
-                val read = input.read(respBytes, totalRead, respLength - totalRead)
-                if (read == -1) break
-                totalRead += read
-            }
         }
     }
 
