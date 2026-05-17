@@ -63,6 +63,12 @@ class VirtualAndroidClient {
     private var sampleRate: Int = 48000
     private var channelCount: Int = 2
 
+    var logCallback: ((String) -> Unit)? = null
+
+    private fun log(msg: String) {
+        logCallback?.invoke("[VirtualClient] $msg")
+    }
+
     /**
      * 启动虚拟 Android 客户端连接。
      *
@@ -72,6 +78,7 @@ class VirtualAndroidClient {
      */
     fun start(deviceName: String, sampleRate: Int, channelCount: Int) {
         if (connected) {
+            log("Already connected, skipping start")
             return
         }
 
@@ -81,12 +88,28 @@ class VirtualAndroidClient {
 
         scope.launch(Dispatchers.IO) {
             try {
-                connectTcp()
-                setupUdp()
+                log("Connecting TCP to $TCP_HOST:$TCP_PORT...")
+                try {
+                    connectTcp()
+                    log("TCP connected and handshake done")
+                } catch (e: Exception) {
+                    log("TCP connect failed: ${e.javaClass.simpleName}: ${e.message}")
+                    cleanup()
+                    return@launch
+                }
+
+                try {
+                    setupUdp()
+                    log("UDP socket created")
+                } catch (e: Exception) {
+                    log("UDP setup failed (non-fatal): ${e.javaClass.simpleName}: ${e.message}")
+                }
+
                 startMessageLoops()
                 connected = true
+                log("Virtual Android client started successfully")
             } catch (e: Exception) {
-                e.printStackTrace()
+                log("Fatal error during start: ${e.javaClass.simpleName}: ${e.message}")
                 cleanup()
             }
         }
@@ -178,12 +201,14 @@ class VirtualAndroidClient {
 
         output.write(CHECK_1.encodeToByteArray())
         output.flush()
+        log("Sent Check1")
 
         val check2Buf = ByteArray(CHECK_2_LEN)
         var totalRead = 0
         while (totalRead < CHECK_2_LEN) {
             val read = input.read(check2Buf, totalRead, CHECK_2_LEN - totalRead)
             if (read == -1) {
+                log("Handshake failed: EOF while reading Check2")
                 throw EOFException("Handshake failed: connection closed while reading Check2")
             }
             totalRead += read
@@ -191,8 +216,10 @@ class VirtualAndroidClient {
 
         val check2String = check2Buf.decodeToString()
         if (check2String != CHECK_2) {
+            log("Handshake failed: expected '$CHECK_2', got '$check2String'")
             throw IOException("Handshake failed: expected '$CHECK_2', got '$check2String'")
         }
+        log("Received Check2, handshake complete")
     }
 
     private fun setupUdp() {

@@ -250,6 +250,7 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
         audioEffectProvider.setAudioConfig(hello.sampleRate, hello.channelCount)
 
         val client = VirtualAndroidClient()
+        client.logCallback = { msg -> ctx.log(msg) }
         virtualClient = client
         client.start(hello.deviceName, hello.sampleRate, hello.channelCount)
 
