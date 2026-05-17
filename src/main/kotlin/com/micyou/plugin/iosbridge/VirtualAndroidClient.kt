@@ -109,6 +109,7 @@ class VirtualAndroidClient {
 
                 startMessageLoops()
                 connected = true
+                sendConnectMessage()
                 log("Virtual Android client started successfully")
             } catch (e: Exception) {
                 log("Fatal error during start: ${e.javaClass.simpleName}: ${e.message}")
@@ -166,15 +167,13 @@ class VirtualAndroidClient {
     /**
      * 断开连接并清理所有资源。
      */
-    fun stop() {
+    suspend fun stop() {
         val previousConnected = connected
         connected = false
-        runBlocking {
-            withTimeoutOrNull(2000) {
-                writerJob?.join()
-                pingJob?.join()
-                receiveJob?.join()
-            }
+        withTimeoutOrNull(2000) {
+            writerJob?.join()
+            pingJob?.join()
+            receiveJob?.join()
         }
         cleanup()
         if (previousConnected) {
@@ -383,6 +382,14 @@ class VirtualAndroidClient {
         }
     }
 
+    private fun sendConnectMessage() {
+        try {
+            sendChannel?.trySend(MessageWrapper(connect = ConnectMessage()))
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     private fun cleanup() {
         connected = false
 
@@ -428,5 +435,9 @@ class VirtualAndroidClient {
         }
         udpSocket = null
         udpAddress = null
+
+        deviceName = ""
+        sampleRate = 48000
+        channelCount = 2
     }
 }

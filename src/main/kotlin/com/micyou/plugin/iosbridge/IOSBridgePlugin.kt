@@ -46,11 +46,21 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
     @Volatile
     private var virtualClient: VirtualAndroidClient? = null
 
+    @Volatile
+    private var enabled = false
+
+    @Volatile
+    private var lastKeepAliveTime: Long = 0L
+
+    private var keepAliveJob: Job? = null
+
     companion object {
         const val CHANNEL_TCP_CONTROL = "ios-bridge-tcp-control"
         const val CHANNEL_UDP_AUDIO = "ios-bridge-udp-audio"
         const val DEFAULT_TCP_PORT = 8900
         const val DEFAULT_UDP_PORT = 8901
+        const val KEEP_ALIVE_TIMEOUT_MS = 15000L
+        const val KEEP_ALIVE_CHECK_INTERVAL_MS = 3000L
     }
 
     override fun onLoad(ctx: PluginContext) {
@@ -78,6 +88,7 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
 
     override fun onEnable() {
         val ctx = context ?: return
+        enabled = true
         ctx.log("iOS To PC plugin enabled")
 
         ctx.host.registerAudioEffect(audioEffectProvider, effectPriority)
@@ -120,27 +131,44 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
             ctx.host.showNotification("iOS Bridge Ready", "Please connect iOS device to port $controlPort")
             ctx.log("Plugin ready. Control port: $controlPort, Audio port: $audioPort, IP: $ip")
         }
+
+        keepAliveJob = scope.launch {
+            while (isActive) {
+                delay(KEEP_ALIVE_CHECK_INTERVAL_MS)
+                val last = lastKeepAliveTime
+                if (last > 0 && System.currentTimeMillis() - last > KEEP_ALIVE_TIMEOUT_MS) {
+                    ctx.log("Keep-alive timeout, disconnecting iOS device")
+                    disconnectIos()
+                    lastKeepAliveTime = 0
+                }
+            }
+        }
     }
 
     override fun onDisable() {
         val ctx = context ?: return
+        enabled = false
         ctx.log("iOS To PC plugin disabling...")
 
         ctx.host.unregisterAudioEffect(audioEffectProvider)
-        runBlocking {
+        scope.launch {
             stopChannels()
         }
         ctx.log("iOS To PC plugin disabled")
     }
 
     override fun onUnload() {
+        enabled = false
         context?.log("iOS To PC plugin unloading...")
-        runBlocking {
+        scope.launch {
             stopChannels()
         }
+        keepAliveJob?.cancel()
+        keepAliveJob = null
         scope.cancel()
         controlChannel = null
         audioChannel = null
+        virtualClient = null
         context = null
     }
 
@@ -220,11 +248,13 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
         payload: ByteArray,
         channel: PluginDataChannel
     ) {
+        if (!enabled) return
         when (header.type) {
             IosProtocol.MessageType.Hello.value -> {
                 handleHello(payload, channel)
             }
             IosProtocol.MessageType.KeepAlive.value -> {
+                lastKeepAliveTime = System.currentTimeMillis()
                 scope.launch {
                     val ack = IosProtocol.encodeKeepAlive(header.sequence)
                     channel.send(ack)
@@ -235,9 +265,7 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
             }
             IosProtocol.MessageType.Disconnect.value -> {
                 context?.log("iOS device disconnected")
-                audioEffectProvider.reset()
-                virtualClient?.stop()
-                virtualClient = null
+                disconnectIos()
             }
         }
     }
@@ -249,10 +277,19 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
         ctx.log("iOS device connected: ${hello.deviceName}")
         audioEffectProvider.setAudioConfig(hello.sampleRate, hello.channelCount)
 
+        val existing = virtualClient
+        if (existing != null) {
+            scope.launch {
+                existing.stop()
+            }
+        }
+        virtualClient = null
+
         val client = VirtualAndroidClient()
         client.logCallback = { msg -> ctx.log(msg) }
         virtualClient = client
         client.start(hello.deviceName, hello.sampleRate, hello.channelCount)
+        lastKeepAliveTime = System.currentTimeMillis()
 
         ctx.host.showNotification("iOS Bridge", "Device '${hello.deviceName}' connected and ready for audio streaming")
         ctx.host.showSnackbar("iOS设备 '${hello.deviceName}' 已连接")
@@ -264,6 +301,7 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
     }
 
     private fun handleAudioFrame(payload: ByteArray) {
+        if (!enabled) return
         val frame = IosProtocol.parseAudioFramePayload(payload) ?: return
         if (frame.pcmData.isNotEmpty()) {
             val client = virtualClient
@@ -280,6 +318,18 @@ class IOSBridgePlugin : Plugin, AudioEffectPlugin {
                 audioEffectProvider.addPcm16LeData(frame.pcmData)
             }
         }
+    }
+
+    private fun disconnectIos() {
+        audioEffectProvider.reset()
+        val client = virtualClient
+        if (client != null) {
+            scope.launch {
+                client.stop()
+            }
+        }
+        virtualClient = null
+        lastKeepAliveTime = 0
     }
 
     private fun startAudioListener(channel: PluginDataChannel) {
