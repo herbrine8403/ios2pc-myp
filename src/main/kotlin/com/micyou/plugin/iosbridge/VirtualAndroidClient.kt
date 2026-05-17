@@ -11,6 +11,8 @@ import java.io.IOException
 import java.net.*
 import java.nio.ByteBuffer
 
+private fun ByteArray.toHex(): String = joinToString("") { "%02X".format(it) }
+
 /**
  * 虚拟 Android 客户端核心。
  * 模拟 Android 端行为，向 PC 服务器发起连接并发送音频数据。
@@ -205,21 +207,30 @@ class VirtualAndroidClient {
 
         val check2Buf = ByteArray(CHECK_2_LEN)
         var totalRead = 0
+        var attempts = 0
         while (totalRead < CHECK_2_LEN) {
             val read = input.read(check2Buf, totalRead, CHECK_2_LEN - totalRead)
             if (read == -1) {
-                log("Handshake failed: EOF while reading Check2")
+                log("Handshake failed: EOF while reading Check2 (read $totalRead/${CHECK_2_LEN} bytes)")
                 throw EOFException("Handshake failed: connection closed while reading Check2")
             }
             totalRead += read
+            attempts++
+            if (attempts > 100) {
+                log("Handshake failed: too many read attempts")
+                throw IOException("Handshake failed: too many read attempts")
+            }
+            if (totalRead < CHECK_2_LEN) {
+                kotlinx.coroutines.delay(10)
+            }
         }
 
         val check2String = check2Buf.decodeToString()
         if (check2String != CHECK_2) {
-            log("Handshake failed: expected '$CHECK_2', got '$check2String'")
+            log("Handshake failed: expected '$CHECK_2', got '$check2String' (hex=${check2Buf.toHex()})")
             throw IOException("Handshake failed: expected '$CHECK_2', got '$check2String'")
         }
-        log("Received Check2, handshake complete")
+        log("Received Check2 ($CHECK_2_LEN bytes), handshake complete")
     }
 
     private fun setupUdp() {
