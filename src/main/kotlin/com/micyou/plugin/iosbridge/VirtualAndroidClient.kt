@@ -214,6 +214,9 @@ class VirtualAndroidClient {
                 log("Handshake failed: EOF while reading Check2 (read $totalRead/${CHECK_2_LEN} bytes)")
                 throw EOFException("Handshake failed: connection closed while reading Check2")
             }
+            if (read > 0) {
+                log("Read chunk: $read bytes, total=$totalRead+$read=${totalRead+read}")
+            }
             totalRead += read
             attempts++
             if (attempts > 100) {
