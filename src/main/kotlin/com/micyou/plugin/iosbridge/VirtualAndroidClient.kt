@@ -29,7 +29,7 @@ class VirtualAndroidClient {
         private const val CHECK_1 = "MicYouCheck1"
         private const val CHECK_2 = "MicYouCheck2"
         private const val CHECK_1_LEN = 11
-        private const val CHECK_2_LEN = 11
+        private const val CHECK_2_LEN = 12
 
         private const val TCP_HOST = "127.0.0.1"
         private const val TCP_PORT = 6000
